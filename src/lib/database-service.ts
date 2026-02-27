@@ -471,8 +471,8 @@ export class StaffDatabaseService {
       .single();
 
     if (error) {
-      // If no settings row exists yet, return defaults
-      if (error.code === 'PGRST116') {
+      // If no settings row exists yet OR table doesn't exist, return defaults
+      if (error.code === 'PGRST116' || error.code === '42P01') {
         return {
           restaurant_id: restaurantId,
           opening_hours: {},
