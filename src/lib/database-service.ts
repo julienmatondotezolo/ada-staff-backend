@@ -456,6 +456,132 @@ export class StaffDatabaseService {
     
     return data;
   }
+
+  // =================== RESTAURANT SETTINGS ===================
+
+  /**
+   * Get restaurant settings (opening hours, schedule rules, info)
+   * Uses restaurant_settings table with upsert pattern
+   */
+  async getRestaurantSettings(restaurantId: string): Promise<Record<string, any>> {
+    const { data, error } = await supabase
+      .from('restaurant_settings')
+      .select('*')
+      .eq('restaurant_id', restaurantId)
+      .single();
+
+    if (error) {
+      // If no settings row exists yet, return defaults
+      if (error.code === 'PGRST116') {
+        return {
+          restaurant_id: restaurantId,
+          opening_hours: {},
+          schedule_rules: {
+            default_break_minutes: 30,
+            max_hours_per_week: 38,
+            min_staff_per_service: 2,
+            min_rest_days_per_week: 2,
+          },
+          restaurant_info: {},
+        };
+      }
+      throw new Error(`Failed to fetch restaurant settings: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  /**
+   * Update restaurant settings (upsert — creates if missing)
+   */
+  async updateRestaurantSettings(
+    restaurantId: string,
+    updates: Record<string, any>,
+    updatedBy: string
+  ): Promise<Record<string, any>> {
+    // First try to get existing settings
+    const { data: existing } = await supabase
+      .from('restaurant_settings')
+      .select('id')
+      .eq('restaurant_id', restaurantId)
+      .single();
+
+    const payload: Record<string, any> = {
+      restaurant_id: restaurantId,
+      updated_at: new Date().toISOString(),
+      updated_by: updatedBy,
+    };
+
+    if (updates.opening_hours !== undefined) payload.opening_hours = updates.opening_hours;
+    if (updates.schedule_rules !== undefined) payload.schedule_rules = updates.schedule_rules;
+    if (updates.restaurant_info !== undefined) payload.restaurant_info = updates.restaurant_info;
+
+    let data, error;
+
+    if (existing) {
+      // Update existing row
+      ({ data, error } = await supabase
+        .from('restaurant_settings')
+        .update(payload)
+        .eq('restaurant_id', restaurantId)
+        .select()
+        .single());
+    } else {
+      // Insert new row
+      payload.created_at = new Date().toISOString();
+      ({ data, error } = await supabase
+        .from('restaurant_settings')
+        .insert(payload)
+        .select()
+        .single());
+    }
+
+    if (error) {
+      throw new Error(`Failed to update restaurant settings: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  /**
+   * Initialize restaurant_settings table if it doesn't exist
+   */
+  async initializeSettingsTable(): Promise<void> {
+    const sql = `
+      CREATE TABLE IF NOT EXISTS restaurant_settings (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        restaurant_id UUID NOT NULL UNIQUE REFERENCES restaurants(id) ON DELETE CASCADE,
+        opening_hours JSONB NOT NULL DEFAULT '{}',
+        schedule_rules JSONB NOT NULL DEFAULT '{"default_break_minutes": 30, "max_hours_per_week": 38, "min_staff_per_service": 2, "min_rest_days_per_week": 2}',
+        restaurant_info JSONB NOT NULL DEFAULT '{}',
+        updated_by UUID,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
+      -- Index
+      CREATE INDEX IF NOT EXISTS idx_restaurant_settings_restaurant_id ON restaurant_settings(restaurant_id);
+
+      -- Row Level Security
+      ALTER TABLE restaurant_settings ENABLE ROW LEVEL SECURITY;
+
+      -- RLS Policy
+      DO $$ BEGIN
+        CREATE POLICY "Users can access settings from their restaurants" ON restaurant_settings
+          FOR ALL USING (
+            EXISTS (
+              SELECT 1 FROM user_restaurant_access
+              WHERE restaurant_id = restaurant_settings.restaurant_id
+              AND user_id = auth.uid()
+              AND active = true
+            )
+          );
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+    `;
+
+    await supabase.rpc('exec_sql', { sql });
+  }
 }
 
 export const staffDb = new StaffDatabaseService();

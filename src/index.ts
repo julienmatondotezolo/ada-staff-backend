@@ -7,6 +7,7 @@ dotenv.config();
 
 import planningRoutes from "./routes/planning";
 import employeeRoutes from "./routes/employees";
+import settingsRoutes from "./routes/settings";
 import { errorHandler } from "./middleware/error-handler";
 import { requestLogger } from "./middleware/request-logger";
 import { setupSwagger } from "./config/swagger";
@@ -50,6 +51,7 @@ async function initializeDatabase() {
   try {
     console.log("🔄 Initializing database tables...");
     await staffDb.initializeTables();
+    await staffDb.initializeSettingsTable();
     console.log("✅ Database tables initialized successfully");
   } catch (error) {
     console.error("❌ Database initialization failed:", error);
@@ -176,6 +178,7 @@ app.get("/", (_req, res) => {
 // ─── Staff Management Routes ───────────────────────────────────────────────
 app.use("/api/v1/restaurants/:restaurantId/planning", planningRoutes);
 app.use("/api/v1/restaurants/:restaurantId/employees", employeeRoutes);
+app.use("/api/v1/restaurants/:restaurantId/settings", settingsRoutes);
 
 // ─── 404 handler ───────────────────────────────────────────────────────────
 app.use("*", (req, res) => {
@@ -186,7 +189,8 @@ app.use("*", (req, res) => {
       health: "/health",
       docs: "/api-docs",
       employees: "/api/v1/restaurants/{restaurantId}/employees",
-      planning: "/api/v1/restaurants/{restaurantId}/planning/*"
+      planning: "/api/v1/restaurants/{restaurantId}/planning/*",
+      settings: "/api/v1/restaurants/{restaurantId}/settings"
     },
     documentation: "https://adastaff.mindgen.app/api-docs"
   });
