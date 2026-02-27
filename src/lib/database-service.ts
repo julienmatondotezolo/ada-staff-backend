@@ -56,6 +56,18 @@ export interface ScheduleTemplate {
   updated_at: string;
 }
 
+export interface ShiftPreset {
+  id: string;
+  restaurant_id: string;
+  name: string;
+  color: string;
+  shifts: { start_time: string; end_time: string }[];
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export class StaffDatabaseService {
   
   /**
@@ -542,6 +554,118 @@ export class StaffDatabaseService {
 
     return data;
   }
+
+  // =================== SHIFT PRESETS ===================
+
+  /**
+   * Get all active shift presets for a restaurant
+   */
+  async getShiftPresets(restaurantId: string): Promise<ShiftPreset[]> {
+    const { data, error } = await supabase
+      .from('shift_presets')
+      .select('*')
+      .eq('restaurant_id', restaurantId)
+      .eq('is_active', true)
+      .order('sort_order')
+      .order('name');
+
+    if (error) {
+      // Table doesn't exist yet — return empty
+      if (error.code === '42P01') return [];
+      throw new Error(`Failed to fetch shift presets: ${error.message}`);
+    }
+
+    return data || [];
+  }
+
+  /**
+   * Get a single shift preset by ID
+   */
+  async getShiftPresetById(id: string, restaurantId: string): Promise<ShiftPreset | null> {
+    const { data, error } = await supabase
+      .from('shift_presets')
+      .select('*')
+      .eq('id', id)
+      .eq('restaurant_id', restaurantId)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') return null;
+      throw new Error(`Failed to fetch shift preset: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  /**
+   * Create a new shift preset
+   */
+  async createShiftPreset(presetData: Omit<ShiftPreset, 'id' | 'created_at' | 'updated_at'>): Promise<ShiftPreset> {
+    const { data, error } = await supabase
+      .from('shift_presets')
+      .insert(presetData)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to create shift preset: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  /**
+   * Update a shift preset
+   */
+  async updateShiftPreset(id: string, restaurantId: string, updates: Partial<ShiftPreset>): Promise<ShiftPreset> {
+    const { data, error } = await supabase
+      .from('shift_presets')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('restaurant_id', restaurantId)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to update shift preset: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  /**
+   * Delete (deactivate) a shift preset
+   */
+  async deleteShiftPreset(id: string, restaurantId: string): Promise<void> {
+    const { error } = await supabase
+      .from('shift_presets')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('restaurant_id', restaurantId);
+
+    if (error) {
+      throw new Error(`Failed to delete shift preset: ${error.message}`);
+    }
+  }
+
+  /**
+   * Reorder shift presets
+   */
+  async reorderShiftPresets(restaurantId: string, orderedIds: string[]): Promise<void> {
+    for (let i = 0; i < orderedIds.length; i++) {
+      const { error } = await supabase
+        .from('shift_presets')
+        .update({ sort_order: i, updated_at: new Date().toISOString() })
+        .eq('id', orderedIds[i])
+        .eq('restaurant_id', restaurantId);
+
+      if (error) {
+        throw new Error(`Failed to reorder shift presets: ${error.message}`);
+      }
+    }
+  }
+
+  // =================== RESTAURANT SETTINGS ===================
 
   /**
    * Initialize restaurant_settings table if it doesn't exist

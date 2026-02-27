@@ -8,6 +8,7 @@ dotenv.config();
 import planningRoutes from "./routes/planning";
 import employeeRoutes from "./routes/employees";
 import settingsRoutes from "./routes/settings";
+import shiftPresetsRoutes from "./routes/shift-presets";
 import { errorHandler } from "./middleware/error-handler";
 import { requestLogger } from "./middleware/request-logger";
 import { setupSwagger } from "./config/swagger";
@@ -179,6 +180,7 @@ app.get("/", (_req, res) => {
 app.use("/api/v1/restaurants/:restaurantId/planning", planningRoutes);
 app.use("/api/v1/restaurants/:restaurantId/employees", employeeRoutes);
 app.use("/api/v1/restaurants/:restaurantId/settings", settingsRoutes);
+app.use("/api/v1/restaurants/:restaurantId/shift-presets", shiftPresetsRoutes);
 
 // ─── 404 handler ───────────────────────────────────────────────────────────
 app.use("*", (req, res) => {
@@ -190,7 +192,8 @@ app.use("*", (req, res) => {
       docs: "/api-docs",
       employees: "/api/v1/restaurants/{restaurantId}/employees",
       planning: "/api/v1/restaurants/{restaurantId}/planning/*",
-      settings: "/api/v1/restaurants/{restaurantId}/settings"
+      settings: "/api/v1/restaurants/{restaurantId}/settings",
+      shift_presets: "/api/v1/restaurants/{restaurantId}/shift-presets"
     },
     documentation: "https://adastaff.mindgen.app/api-docs"
   });
