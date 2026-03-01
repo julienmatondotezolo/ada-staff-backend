@@ -1,13 +1,112 @@
 import { Router, Request, Response } from "express";
+import crypto from "crypto";
 import { staffDb } from "../lib/database-service";
 import { authenticateToken, requireRestaurantAccess, requireStaffManagement } from "../middleware/auth";
 import { publicLimiter, adminLimiter } from "../middleware/rate-limit";
+import { sendEmail } from "../lib/email-service";
+import { getShiftNotificationHtml } from "../templates/shift-notification";
 
 const router = Router({ mergeParams: true });
 
 // Apply authentication to all routes
 router.use(authenticateToken);
 router.use(requireRestaurantAccess());
+
+const BASE_URL = process.env.BASE_URL || "https://adastaff.mindgen.app";
+
+/**
+ * Send shift notification email and create token + notification
+ * Used by both single and bulk shift creation
+ */
+async function sendShiftNotification(
+  shiftId: string,
+  employeeId: string,
+  restaurantId: string,
+  employee: { first_name: string; last_name: string; email?: string; position: string },
+  shiftDetails: { scheduled_date: string; start_time: string; end_time: string; position: string },
+  createdBy: string
+): Promise<void> {
+  try {
+    const restaurantName = await staffDb.getRestaurantName(restaurantId);
+    const employeeName = `${employee.first_name} ${employee.last_name}`;
+
+    // Format date
+    let dateFormatted: string;
+    try {
+      const d = new Date(shiftDetails.scheduled_date + "T00:00:00");
+      dateFormatted = d.toLocaleDateString("en-US", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+    } catch {
+      dateFormatted = shiftDetails.scheduled_date;
+    }
+
+    const startTime = shiftDetails.start_time.substring(0, 5);
+    const endTime = shiftDetails.end_time.substring(0, 5);
+
+    // Create shift_pending notification
+    const managers = await staffDb.getRestaurantManagers(restaurantId);
+    for (const manager of managers) {
+      await staffDb.createNotification({
+        restaurant_id: restaurantId,
+        recipient_user_id: manager.user_id,
+        type: "shift_pending",
+        title: `Shift assigned to ${employeeName}`,
+        message: `${employeeName} has been assigned a shift on ${dateFormatted} (${startTime} - ${endTime}) as ${shiftDetails.position}. Awaiting response.`,
+        metadata: {
+          shift_id: shiftId,
+          employee_id: employeeId,
+          employee_name: employeeName,
+          date: shiftDetails.scheduled_date,
+          start_time: shiftDetails.start_time,
+          end_time: shiftDetails.end_time,
+          position: shiftDetails.position,
+        },
+      });
+    }
+
+    // If employee has an email, generate token and send notification
+    if (employee.email) {
+      const token = crypto.randomUUID();
+      const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(); // 3 days
+
+      await staffDb.createShiftResponseToken({
+        shift_id: shiftId,
+        employee_id: employeeId,
+        restaurant_id: restaurantId,
+        token,
+        expires_at: expiresAt,
+      });
+
+      const acceptUrl = `${BASE_URL}/api/v1/shift-response/${token}?action=accepted`;
+      const declineUrl = `${BASE_URL}/api/v1/shift-response/${token}?action=declined`;
+
+      const html = getShiftNotificationHtml({
+        employeeName,
+        restaurantName,
+        date: dateFormatted,
+        startTime,
+        endTime,
+        position: shiftDetails.position,
+        acceptUrl,
+        declineUrl,
+      });
+
+      // Fire and forget
+      sendEmail({
+        to: employee.email,
+        subject: `New Shift: ${dateFormatted} at ${restaurantName}`,
+        html,
+      }).catch((err) => console.error("[Planning] Failed to send shift notification email:", err));
+    }
+  } catch (err) {
+    // Don't fail shift creation if notification fails
+    console.error("[Planning] Error sending shift notification:", err);
+  }
+}
 
 /**
  * @swagger
@@ -271,6 +370,9 @@ router.post("/shifts", requireStaffManagement(), adminLimiter, async (req: Reque
       return;
     }
     
+    // Default to 'scheduled' instead of 'draft' when employee has email
+    const shiftStatus = status || (employee.email ? 'scheduled' : 'draft');
+
     const newShift = await staffDb.createShift({
       restaurant_id: restaurantId,
       employee_id,
@@ -279,10 +381,20 @@ router.post("/shifts", requireStaffManagement(), adminLimiter, async (req: Reque
       end_time,
       position,
       break_duration_minutes: breakMinutes,
-      status: status || 'draft',
+      status: shiftStatus,
       notes: notes?.trim(),
       created_by: req.user!.id
     });
+    
+    // Send shift notification (async, non-blocking)
+    sendShiftNotification(
+      newShift.id,
+      employee_id,
+      restaurantId,
+      employee,
+      { scheduled_date, start_time, end_time, position },
+      req.user!.id
+    );
     
     // Calculate duration for response
     const startTimeObj = new Date(`1970-01-01T${start_time}`);
@@ -631,6 +743,9 @@ router.post("/shifts/bulk", requireStaffManagement(), adminLimiter, async (req: 
           continue;
         }
         
+        // Default to 'scheduled' instead of 'draft' when employee has email
+        const bulkShiftStatus = shift.status || (employee.email ? 'scheduled' : 'draft');
+
         const newShift = await staffDb.createShift({
           restaurant_id: restaurantId,
           employee_id: shift.employee_id,
@@ -639,11 +754,26 @@ router.post("/shifts/bulk", requireStaffManagement(), adminLimiter, async (req: 
           end_time: shift.end_time,
           position: shift.position,
           break_duration_minutes: parseInt(shift.break_duration_minutes) || 30,
-          status: shift.status || 'draft',
+          status: bulkShiftStatus,
           notes: shift.notes?.trim(),
           created_by: req.user!.id
         });
         
+        // Send shift notification (async, non-blocking)
+        sendShiftNotification(
+          newShift.id,
+          shift.employee_id,
+          restaurantId,
+          employee,
+          {
+            scheduled_date: shift.scheduled_date,
+            start_time: shift.start_time,
+            end_time: shift.end_time,
+            position: shift.position,
+          },
+          req.user!.id
+        );
+
         createdShifts.push({
           id: newShift.id,
           employee_id: newShift.employee_id,

@@ -10,6 +10,9 @@ import employeeRoutes from "./routes/employees";
 import settingsRoutes from "./routes/settings";
 import shiftPresetsRoutes from "./routes/shift-presets";
 import closingPeriodsRoutes from "./routes/closing-periods";
+import notificationsRoutes from "./routes/notifications";
+import shiftResponseRoutes from "./routes/shift-responses";
+import analyticsRoutes from "./routes/analytics";
 import { errorHandler } from "./middleware/error-handler";
 import { requestLogger } from "./middleware/request-logger";
 import { setupSwagger } from "./config/swagger";
@@ -90,7 +93,7 @@ setupSwagger(app);
  *                   example: adastaff-api
  *                 version:
  *                   type: string
- *                   example: 2.0.0
+ *                   example: 3.0.0
  *                 uptime:
  *                   type: integer
  *                   description: Uptime in seconds
@@ -117,7 +120,7 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "healthy",
     service: "adastaff-api",
-    version: "2.0.0",
+    version: "3.0.0",
     uptime: Math.floor((Date.now() - startTime) / 1000),
     timestamp: new Date().toISOString(),
     features: {
@@ -126,7 +129,10 @@ app.get("/health", (_req, res) => {
       staff_management: true,
       shift_scheduling: true,
       schedule_templates: true,
-      multi_tenant: true
+      multi_tenant: true,
+      notifications: true,
+      shift_email_notifications: true,
+      labor_cost_analytics: true
     }
   });
 });
@@ -146,12 +152,16 @@ app.get("/", (_req, res) => {
   res.json({
     name: "AdaStaff API",
     description: "Employee Planning & Management Microservice",
-    version: "2.0.0",
+    version: "3.0.0",
     features: [
       "Employee Management",
       "Shift Scheduling", 
       "Schedule Templates",
       "Closing Periods",
+      "Shift Notifications & Email",
+      "Shift Response Tokens",
+      "Notifications System",
+      "Labor Cost Analytics",
       "Multi-tenant Support",
       "AdaAuth Integration",
       "Real-time Database",
@@ -163,6 +173,9 @@ app.get("/", (_req, res) => {
       shifts: "/api/v1/restaurants/{restaurantId}/planning/shifts",
       templates: "/api/v1/restaurants/{restaurantId}/planning/templates",
       closing_periods: "/api/v1/restaurants/{restaurantId}/closing-periods",
+      notifications: "/api/v1/restaurants/{restaurantId}/notifications",
+      analytics: "/api/v1/restaurants/{restaurantId}/analytics/labor-cost",
+      shift_response: "/api/v1/shift-response/{token}",
       health: "/health",
       docs: "/api-docs"
     },
@@ -185,6 +198,11 @@ app.use("/api/v1/restaurants/:restaurantId/employees", employeeRoutes);
 app.use("/api/v1/restaurants/:restaurantId/settings", settingsRoutes);
 app.use("/api/v1/restaurants/:restaurantId/shift-presets", shiftPresetsRoutes);
 app.use("/api/v1/restaurants/:restaurantId/closing-periods", closingPeriodsRoutes);
+app.use("/api/v1/restaurants/:restaurantId/notifications", notificationsRoutes);
+app.use("/api/v1/restaurants/:restaurantId/analytics", analyticsRoutes);
+
+// ─── Public Routes (token-based, no JWT) ───────────────────────────────────
+app.use("/api/v1/shift-response", shiftResponseRoutes);
 
 // ─── 404 handler ───────────────────────────────────────────────────────────
 app.use("*", (req, res) => {
@@ -198,7 +216,10 @@ app.use("*", (req, res) => {
       planning: "/api/v1/restaurants/{restaurantId}/planning/*",
       settings: "/api/v1/restaurants/{restaurantId}/settings",
       shift_presets: "/api/v1/restaurants/{restaurantId}/shift-presets",
-      closing_periods: "/api/v1/restaurants/{restaurantId}/closing-periods"
+      closing_periods: "/api/v1/restaurants/{restaurantId}/closing-periods",
+      notifications: "/api/v1/restaurants/{restaurantId}/notifications",
+      analytics: "/api/v1/restaurants/{restaurantId}/analytics",
+      shift_response: "/api/v1/shift-response/{token}"
     },
     documentation: "https://adastaff.mindgen.app/api-docs"
   });
@@ -234,7 +255,7 @@ process.on('SIGINT', () => {
 
 // ─── Start server ──────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log('🚀 AdaStaff API v2.0.0 Started');
+  console.log('🚀 AdaStaff API v3.0.0 Started');
   console.log('=====================================');
   console.log(`🌐 Server: http://localhost:${PORT}`);
   console.log(`💚 Health: http://localhost:${PORT}/health`);
@@ -242,12 +263,12 @@ app.listen(PORT, () => {
   console.log(`👥 Employees: http://localhost:${PORT}/api/v1/restaurants/{id}/employees`);
   console.log(`📅 Planning: http://localhost:${PORT}/api/v1/restaurants/{id}/planning`);
   console.log('=====================================');
-  console.log(`🏷️  Version: 2.0.0`);
+  console.log(`🏷️  Version: 3.0.0`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔒 CORS Origins: ${allowedOrigins?.join(', ') || 'All'}`);
   console.log(`🔐 Authentication: AdaAuth Integration Enabled`);
   console.log(`🗄️  Database: Supabase with RLS Security`);
-  console.log(`⚡ Features: Employee Management, Shift Scheduling, Templates`);
+  console.log(`⚡ Features: Employees, Shifts, Notifications, Analytics`);
   console.log('=====================================');
   
   // Log startup time

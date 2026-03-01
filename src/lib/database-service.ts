@@ -807,6 +807,326 @@ export class StaffDatabaseService {
 
     await supabase.rpc('exec_sql', { sql });
   }
+
+  // =================== SHIFT RESPONSE TOKENS ===================
+
+  /**
+   * Create a shift response token
+   */
+  async createShiftResponseToken(data: {
+    shift_id: string;
+    employee_id: string;
+    restaurant_id: string;
+    token: string;
+    expires_at: string;
+  }): Promise<{ id: string; token: string }> {
+    const { data: created, error } = await supabase
+      .from('shift_response_tokens')
+      .insert(data)
+      .select('id, token')
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to create shift response token: ${error.message}`);
+    }
+
+    return created;
+  }
+
+  /**
+   * Get a shift response token with shift and employee details
+   */
+  async getShiftResponseToken(token: string): Promise<{
+    id: string;
+    shift_id: string;
+    employee_id: string;
+    restaurant_id: string;
+    token: string;
+    action: string | null;
+    responded_at: string | null;
+    expires_at: string;
+    created_at: string;
+    shift: {
+      id: string;
+      scheduled_date: string;
+      start_time: string;
+      end_time: string;
+      position: string;
+      status: string;
+      break_duration_minutes: number;
+      restaurant_id: string;
+    };
+    employee: {
+      id: string;
+      first_name: string;
+      last_name: string;
+      email: string | null;
+      position: string;
+    };
+  } | null> {
+    const { data, error } = await supabase
+      .from('shift_response_tokens')
+      .select(`
+        *,
+        shift:shifts(id, scheduled_date, start_time, end_time, position, status, break_duration_minutes, restaurant_id),
+        employee:employees(id, first_name, last_name, email, position)
+      `)
+      .eq('token', token)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') return null;
+      throw new Error(`Failed to fetch shift response token: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  /**
+   * Update shift response token with action
+   */
+  async updateShiftResponseToken(token: string, action: 'accepted' | 'declined'): Promise<void> {
+    const { error } = await supabase
+      .from('shift_response_tokens')
+      .update({
+        action,
+        responded_at: new Date().toISOString(),
+      })
+      .eq('token', token);
+
+    if (error) {
+      throw new Error(`Failed to update shift response token: ${error.message}`);
+    }
+  }
+
+  // =================== NOTIFICATIONS ===================
+
+  /**
+   * Get notifications for a restaurant (paginated, newest first)
+   */
+  async getNotifications(
+    restaurantId: string,
+    options: { limit?: number; offset?: number; unreadOnly?: boolean }
+  ): Promise<{ id: string; restaurant_id: string; recipient_user_id: string | null; type: string; title: string; message: string | null; read: boolean; metadata: Record<string, any>; created_at: string }[]> {
+    const limit = options.limit || 20;
+    const offset = options.offset || 0;
+
+    let query = supabase
+      .from('notifications')
+      .select('*')
+      .eq('restaurant_id', restaurantId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (options.unreadOnly) {
+      query = query.eq('read', false);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new Error(`Failed to fetch notifications: ${error.message}`);
+    }
+
+    return data || [];
+  }
+
+  /**
+   * Create a notification
+   */
+  async createNotification(data: {
+    restaurant_id: string;
+    recipient_user_id?: string;
+    type: string;
+    title: string;
+    message?: string;
+    metadata?: Record<string, any>;
+  }): Promise<{ id: string }> {
+    const { data: created, error } = await supabase
+      .from('notifications')
+      .insert(data)
+      .select('id')
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to create notification: ${error.message}`);
+    }
+
+    return created;
+  }
+
+  /**
+   * Mark a single notification as read
+   */
+  async markNotificationRead(id: string, restaurantId: string): Promise<void> {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('id', id)
+      .eq('restaurant_id', restaurantId);
+
+    if (error) {
+      throw new Error(`Failed to mark notification as read: ${error.message}`);
+    }
+  }
+
+  /**
+   * Mark all notifications as read for a restaurant (optionally scoped to a user)
+   */
+  async markAllNotificationsRead(restaurantId: string, userId?: string): Promise<void> {
+    let query = supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('restaurant_id', restaurantId)
+      .eq('read', false);
+
+    if (userId) {
+      query = query.eq('recipient_user_id', userId);
+    }
+
+    const { error } = await query;
+
+    if (error) {
+      throw new Error(`Failed to mark all notifications as read: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get unread notification count for a restaurant
+   */
+  async getUnreadNotificationCount(restaurantId: string, userId?: string): Promise<number> {
+    let query = supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('restaurant_id', restaurantId)
+      .eq('read', false);
+
+    if (userId) {
+      query = query.eq('recipient_user_id', userId);
+    }
+
+    const { count, error } = await query;
+
+    if (error) {
+      throw new Error(`Failed to get unread notification count: ${error.message}`);
+    }
+
+    return count || 0;
+  }
+
+  // =================== ANALYTICS / LABOR COST ===================
+
+  /**
+   * Get labor cost data: join shifts with employees, group by employee and date
+   */
+  async getLaborCost(
+    restaurantId: string,
+    startDate: string,
+    endDate: string
+  ): Promise<{
+    shifts: {
+      id: string;
+      employee_id: string;
+      employee_first_name: string;
+      employee_last_name: string;
+      hourly_rate: number;
+      scheduled_date: string;
+      start_time: string;
+      end_time: string;
+      break_duration_minutes: number;
+      status: string;
+    }[];
+  }> {
+    const { data, error } = await supabase
+      .from('shifts')
+      .select(`
+        id,
+        employee_id,
+        scheduled_date,
+        start_time,
+        end_time,
+        break_duration_minutes,
+        status,
+        employee:employees(first_name, last_name, hourly_rate)
+      `)
+      .eq('restaurant_id', restaurantId)
+      .gte('scheduled_date', startDate)
+      .lte('scheduled_date', endDate)
+      .in('status', ['scheduled', 'confirmed', 'completed']);
+
+    if (error) {
+      throw new Error(`Failed to fetch labor cost data: ${error.message}`);
+    }
+
+    const shifts = (data || []).map((s: any) => ({
+      id: s.id,
+      employee_id: s.employee_id,
+      employee_first_name: s.employee?.first_name || 'Unknown',
+      employee_last_name: s.employee?.last_name || '',
+      hourly_rate: parseFloat(s.employee?.hourly_rate?.toString() || '0'),
+      scheduled_date: s.scheduled_date,
+      start_time: s.start_time,
+      end_time: s.end_time,
+      break_duration_minutes: s.break_duration_minutes,
+      status: s.status,
+    }));
+
+    return { shifts };
+  }
+
+  /**
+   * Get restaurant name by ID
+   */
+  async getRestaurantName(restaurantId: string): Promise<string> {
+    const { data, error } = await supabase
+      .from('restaurants')
+      .select('name')
+      .eq('id', restaurantId)
+      .single();
+
+    if (error) {
+      console.error('Failed to get restaurant name:', error);
+      return 'Your Restaurant';
+    }
+
+    return data?.name || 'Your Restaurant';
+  }
+
+  /**
+   * Get managers (owner/manager) for a restaurant to send notifications
+   */
+  async getRestaurantManagers(restaurantId: string): Promise<{ user_id: string; role: string; email?: string }[]> {
+    const { data, error } = await supabase
+      .from('user_restaurant_access')
+      .select('user_id, role')
+      .eq('restaurant_id', restaurantId)
+      .eq('active', true)
+      .in('role', ['owner', 'manager']);
+
+    if (error) {
+      console.error('Failed to get restaurant managers:', error);
+      return [];
+    }
+
+    // Get emails for each manager
+    const managers = [];
+    for (const access of data || []) {
+      const { data: profile } = await supabase
+        .from('auth_users')
+        .select('email, full_name')
+        .eq('id', access.user_id)
+        .single();
+
+      managers.push({
+        user_id: access.user_id,
+        role: access.role,
+        email: profile?.email,
+        full_name: profile?.full_name,
+      });
+    }
+
+    return managers;
+  }
 }
 
 export const staffDb = new StaffDatabaseService();
