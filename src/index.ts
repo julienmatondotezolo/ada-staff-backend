@@ -9,6 +9,7 @@ import planningRoutes from "./routes/planning";
 import employeeRoutes from "./routes/employees";
 import settingsRoutes from "./routes/settings";
 import shiftPresetsRoutes from "./routes/shift-presets";
+import closingPeriodsRoutes from "./routes/closing-periods";
 import { errorHandler } from "./middleware/error-handler";
 import { requestLogger } from "./middleware/request-logger";
 import { setupSwagger } from "./config/swagger";
@@ -150,6 +151,7 @@ app.get("/", (_req, res) => {
       "Employee Management",
       "Shift Scheduling", 
       "Schedule Templates",
+      "Closing Periods",
       "Multi-tenant Support",
       "AdaAuth Integration",
       "Real-time Database",
@@ -160,6 +162,7 @@ app.get("/", (_req, res) => {
       employees: "/api/v1/restaurants/{restaurantId}/employees",
       shifts: "/api/v1/restaurants/{restaurantId}/planning/shifts",
       templates: "/api/v1/restaurants/{restaurantId}/planning/templates",
+      closing_periods: "/api/v1/restaurants/{restaurantId}/closing-periods",
       health: "/health",
       docs: "/api-docs"
     },
@@ -181,6 +184,7 @@ app.use("/api/v1/restaurants/:restaurantId/planning", planningRoutes);
 app.use("/api/v1/restaurants/:restaurantId/employees", employeeRoutes);
 app.use("/api/v1/restaurants/:restaurantId/settings", settingsRoutes);
 app.use("/api/v1/restaurants/:restaurantId/shift-presets", shiftPresetsRoutes);
+app.use("/api/v1/restaurants/:restaurantId/closing-periods", closingPeriodsRoutes);
 
 // ─── 404 handler ───────────────────────────────────────────────────────────
 app.use("*", (req, res) => {
@@ -193,7 +197,8 @@ app.use("*", (req, res) => {
       employees: "/api/v1/restaurants/{restaurantId}/employees",
       planning: "/api/v1/restaurants/{restaurantId}/planning/*",
       settings: "/api/v1/restaurants/{restaurantId}/settings",
-      shift_presets: "/api/v1/restaurants/{restaurantId}/shift-presets"
+      shift_presets: "/api/v1/restaurants/{restaurantId}/shift-presets",
+      closing_periods: "/api/v1/restaurants/{restaurantId}/closing-periods"
     },
     documentation: "https://adastaff.mindgen.app/api-docs"
   });

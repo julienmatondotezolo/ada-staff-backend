@@ -68,6 +68,17 @@ export interface ShiftPreset {
   updated_at: string;
 }
 
+export interface ClosingPeriod {
+  id: string;
+  restaurant_id: string;
+  name: string;
+  date_from: string; // YYYY-MM-DD
+  date_to: string;   // YYYY-MM-DD
+  comment?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export class StaffDatabaseService {
   
   /**
@@ -662,6 +673,96 @@ export class StaffDatabaseService {
       if (error) {
         throw new Error(`Failed to reorder shift presets: ${error.message}`);
       }
+    }
+  }
+
+  // =================== CLOSING PERIODS ===================
+
+  /**
+   * Get all closing periods for a restaurant, ordered by date_from
+   */
+  async getClosingPeriods(restaurantId: string): Promise<ClosingPeriod[]> {
+    const { data, error } = await supabase
+      .from('closing_periods')
+      .select('*')
+      .eq('restaurant_id', restaurantId)
+      .order('date_from');
+
+    if (error) {
+      if (error.code === '42P01') return [];
+      throw new Error(`Failed to fetch closing periods: ${error.message}`);
+    }
+
+    return data || [];
+  }
+
+  /**
+   * Get a single closing period by ID
+   */
+  async getClosingPeriodById(id: string, restaurantId: string): Promise<ClosingPeriod | null> {
+    const { data, error } = await supabase
+      .from('closing_periods')
+      .select('*')
+      .eq('id', id)
+      .eq('restaurant_id', restaurantId)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') return null;
+      throw new Error(`Failed to fetch closing period: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  /**
+   * Create a new closing period
+   */
+  async createClosingPeriod(data: Omit<ClosingPeriod, 'id' | 'created_at' | 'updated_at'>): Promise<ClosingPeriod> {
+    const { data: created, error } = await supabase
+      .from('closing_periods')
+      .insert(data)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to create closing period: ${error.message}`);
+    }
+
+    return created;
+  }
+
+  /**
+   * Update a closing period
+   */
+  async updateClosingPeriod(id: string, restaurantId: string, updates: Partial<ClosingPeriod>): Promise<ClosingPeriod> {
+    const { data, error } = await supabase
+      .from('closing_periods')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('restaurant_id', restaurantId)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to update closing period: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  /**
+   * Delete a closing period (hard delete)
+   */
+  async deleteClosingPeriod(id: string, restaurantId: string): Promise<void> {
+    const { error } = await supabase
+      .from('closing_periods')
+      .delete()
+      .eq('id', id)
+      .eq('restaurant_id', restaurantId);
+
+    if (error) {
+      throw new Error(`Failed to delete closing period: ${error.message}`);
     }
   }
 
