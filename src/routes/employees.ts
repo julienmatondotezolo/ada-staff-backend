@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { staffDb } from "../lib/database-service";
-import { authenticateToken, requireRestaurantAccess, requireStaffManagement } from "../middleware/auth";
+import { authenticateToken, requireRestaurantAccess, requireOwner } from "../middleware/auth";
 import { publicLimiter, adminLimiter } from "../middleware/rate-limit";
 
 const router = Router({ mergeParams: true });
@@ -173,7 +173,7 @@ router.get("/", publicLimiter, async (req: Request, res: Response): Promise<void
  *       500:
  *         $ref: '#/components/responses/ServerError'
  */
-router.post("/", requireStaffManagement(), adminLimiter, async (req: Request, res: Response): Promise<void> => {
+router.post("/", requireOwner(), adminLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const { restaurantId } = req.params;
     const { 
@@ -341,7 +341,7 @@ router.get("/:employeeId", publicLimiter, async (req: Request, res: Response): P
  *     description: Update employee information. Requires management access.
  *     tags: [Employee Management]
  */
-router.put("/:employeeId", requireStaffManagement(), adminLimiter, async (req: Request, res: Response): Promise<void> => {
+router.put("/:employeeId", requireOwner(), adminLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const { restaurantId, employeeId } = req.params;
     const updates = req.body;
@@ -405,24 +405,23 @@ router.put("/:employeeId", requireStaffManagement(), adminLimiter, async (req: R
  *     description: Deactivate an employee (soft delete). Requires management access.
  *     tags: [Employee Management]
  */
-router.delete("/:employeeId", requireStaffManagement(), adminLimiter, async (req: Request, res: Response): Promise<void> => {
+router.delete("/:employeeId", requireOwner(), adminLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const { restaurantId, employeeId } = req.params;
     
-    await staffDb.deactivateEmployee(employeeId, restaurantId);
+    await staffDb.deleteEmployee(employeeId, restaurantId);
     
     res.json({
       success: true,
-      message: "Employee deactivated successfully",
+      message: "Employee deleted successfully",
       restaurant_id: restaurantId,
       employee_id: employeeId,
-      deactivated_at: new Date().toISOString()
     });
   } catch (error: any) {
-    console.error("Error deactivating employee:", error);
+    console.error("Error deleting employee:", error);
     res.status(500).json({ 
       error: "SERVER_ERROR", 
-      message: "Failed to deactivate employee",
+      message: "Failed to delete employee",
       details: error.message 
     });
   }
@@ -436,7 +435,7 @@ router.delete("/:employeeId", requireStaffManagement(), adminLimiter, async (req
  *     description: Update employee weekly availability schedule. Requires management access.
  *     tags: [Employee Management]
  */
-router.put("/:employeeId/availability", requireStaffManagement(), adminLimiter, async (req: Request, res: Response): Promise<void> => {
+router.put("/:employeeId/availability", requireOwner(), adminLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const { restaurantId, employeeId } = req.params;
     const { availability } = req.body;

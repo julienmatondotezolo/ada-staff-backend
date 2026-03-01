@@ -135,6 +135,55 @@ export const requireRestaurantAccess = (restaurantIdParam: string = 'restaurantI
 };
 
 /**
+ * Middleware to check if user is owner of restaurant
+ */
+export const requireOwner = (restaurantIdParam: string = 'restaurantId') => {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          error: "UNAUTHORIZED",
+          message: "Authentication required"
+        });
+      }
+
+      const restaurantId = req.params[restaurantIdParam];
+
+      if (!restaurantId) {
+        return res.status(400).json({
+          error: "MISSING_RESTAURANT_ID",
+          message: "Restaurant ID is required"
+        });
+      }
+
+      const { data: access, error } = await supabase
+        .from('user_restaurant_access')
+        .select('*')
+        .eq('user_id', req.user.id)
+        .eq('restaurant_id', restaurantId)
+        .eq('active', true)
+        .single();
+
+      if (error || !access || access.role !== 'owner') {
+        return res.status(403).json({
+          error: "OWNER_ACCESS_DENIED",
+          message: "Cette action est réservée aux propriétaires du restaurant"
+        });
+      }
+
+      req.restaurantId = restaurantId;
+      next();
+    } catch (error: any) {
+      console.error("Owner access check error:", error);
+      return res.status(500).json({
+        error: "ACCESS_CHECK_FAILED",
+        message: "Failed to verify owner access"
+      });
+    }
+  };
+};
+
+/**
  * Middleware to check if user is manager or owner of restaurant
  */
 export const requireStaffManagement = (restaurantIdParam: string = 'restaurantId') => {

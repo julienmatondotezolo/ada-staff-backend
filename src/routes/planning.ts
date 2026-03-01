@@ -13,6 +13,7 @@ router.use(authenticateToken);
 router.use(requireRestaurantAccess());
 
 const BASE_URL = process.env.BASE_URL || "https://adastaff.mindgen.app";
+const FRONTEND_URL = process.env.FRONTEND_URL || "https://ada-planning.vercel.app";
 
 /**
  * Send shift notification email and create token + notification
@@ -34,7 +35,7 @@ async function sendShiftNotification(
     let dateFormatted: string;
     try {
       const d = new Date(shiftDetails.scheduled_date + "T00:00:00");
-      dateFormatted = d.toLocaleDateString("en-US", {
+      dateFormatted = d.toLocaleDateString("nl-BE", {
         weekday: "long",
         year: "numeric",
         month: "long",
@@ -54,8 +55,8 @@ async function sendShiftNotification(
         restaurant_id: restaurantId,
         recipient_user_id: manager.user_id,
         type: "shift_pending",
-        title: `Shift assigned to ${employeeName}`,
-        message: `${employeeName} has been assigned a shift on ${dateFormatted} (${startTime} - ${endTime}) as ${shiftDetails.position}. Awaiting response.`,
+        title: `Shift toegewezen aan ${employeeName}`,
+        message: `${employeeName} heeft een shift op ${dateFormatted} (${startTime} - ${endTime}) als ${shiftDetails.position}. Wacht op reactie.`,
         metadata: {
           shift_id: shiftId,
           employee_id: employeeId,
@@ -81,8 +82,8 @@ async function sendShiftNotification(
         expires_at: expiresAt,
       });
 
-      const acceptUrl = `${BASE_URL}/api/v1/shift-response/${token}?action=accepted`;
-      const declineUrl = `${BASE_URL}/api/v1/shift-response/${token}?action=declined`;
+      const acceptUrl = `${FRONTEND_URL}/shift-response/${token}`;
+      const declineUrl = `${FRONTEND_URL}/shift-response/${token}`;
 
       const html = getShiftNotificationHtml({
         employeeName,
@@ -98,7 +99,7 @@ async function sendShiftNotification(
       // Fire and forget
       sendEmail({
         to: employee.email,
-        subject: `New Shift: ${dateFormatted} at ${restaurantName}`,
+        subject: `Nieuwe Shift: ${dateFormatted} bij ${restaurantName}`,
         html,
       }).catch((err) => console.error("[Planning] Failed to send shift notification email:", err));
     }

@@ -36,7 +36,7 @@ const shiftResponseLimiter = rateLimit({
 function formatDate(dateStr: string): string {
   try {
     const d = new Date(dateStr + "T00:00:00");
-    return d.toLocaleDateString("en-US", {
+    return d.toLocaleDateString("nl-BE", {
       weekday: "long",
       year: "numeric",
       month: "long",
@@ -249,8 +249,8 @@ router.post("/:token", shiftResponseLimiter, async (req: Request, res: Response)
     const notificationType = action === "accepted" ? "shift_accepted" : "shift_declined";
     const notificationTitle =
       action === "accepted"
-        ? `${employeeName} accepted their shift`
-        : `${employeeName} declined their shift`;
+        ? `${employeeName} heeft de shift geaccepteerd`
+        : `${employeeName} heeft de shift geweigerd`;
 
     const managers = await staffDb.getRestaurantManagers(tokenData.restaurant_id);
 
@@ -261,7 +261,7 @@ router.post("/:token", shiftResponseLimiter, async (req: Request, res: Response)
         recipient_user_id: manager.user_id,
         type: notificationType,
         title: notificationTitle,
-        message: `${employeeName} has ${action} their shift on ${formatDate(tokenData.shift.scheduled_date)} (${formatTime(tokenData.shift.start_time)} - ${formatTime(tokenData.shift.end_time)}) as ${tokenData.shift.position}.`,
+        message: `${employeeName} heeft de shift op ${formatDate(tokenData.shift.scheduled_date)} (${formatTime(tokenData.shift.start_time)} - ${formatTime(tokenData.shift.end_time)}) als ${tokenData.shift.position} ${action === 'accepted' ? 'geaccepteerd' : 'geweigerd'}.`,
         metadata: {
           shift_id: tokenData.shift.id,
           employee_id: tokenData.employee.id,
@@ -290,7 +290,7 @@ router.post("/:token", shiftResponseLimiter, async (req: Request, res: Response)
         // Fire and forget — don't block the response
         sendEmail({
           to: manager.email,
-          subject: `Shift ${action}: ${employeeName} — ${formatDate(tokenData.shift.scheduled_date)}`,
+          subject: `Shift ${action === 'accepted' ? 'geaccepteerd' : 'geweigerd'}: ${employeeName} — ${formatDate(tokenData.shift.scheduled_date)}`,
           html,
         }).catch((err) => console.error("[ShiftResponse] Failed to send manager email:", err));
       }
@@ -300,8 +300,8 @@ router.post("/:token", shiftResponseLimiter, async (req: Request, res: Response)
       success: true,
       message:
         action === "accepted"
-          ? "Shift accepted! Your manager has been notified."
-          : "Shift declined. Your manager has been notified.",
+          ? "Shift geaccepteerd! Je verantwoordelijke is op de hoogte gebracht."
+          : "Shift geweigerd. Je verantwoordelijke is op de hoogte gebracht.",
       action,
       shift_status: newShiftStatus,
     });

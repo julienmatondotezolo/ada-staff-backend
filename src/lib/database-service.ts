@@ -332,15 +332,15 @@ export class StaffDatabaseService {
   /**
    * Delete (deactivate) employee
    */
-  async deactivateEmployee(id: string, restaurantId: string): Promise<void> {
+  async deleteEmployee(id: string, restaurantId: string): Promise<void> {
     const { error } = await supabase
       .from('employees')
-      .update({ active: false, updated_at: new Date().toISOString() })
+      .delete()
       .eq('id', id)
       .eq('restaurant_id', restaurantId);
     
     if (error) {
-      throw new Error(`Failed to deactivate employee: ${error.message}`);
+      throw new Error(`Failed to delete employee: ${error.message}`);
     }
   }
 

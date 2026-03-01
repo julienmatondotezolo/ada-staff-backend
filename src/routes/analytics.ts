@@ -1,13 +1,14 @@
 import { Router, Request, Response } from "express";
 import { staffDb } from "../lib/database-service";
-import { authenticateToken, requireRestaurantAccess } from "../middleware/auth";
+import { authenticateToken, requireRestaurantAccess, requireOwner } from "../middleware/auth";
 import { publicLimiter } from "../middleware/rate-limit";
 
 const router = Router({ mergeParams: true });
 
-// Apply authentication to all routes
+// Apply authentication to all routes — owner only
 router.use(authenticateToken);
 router.use(requireRestaurantAccess());
+router.use(requireOwner());
 
 /**
  * Calculate shift duration in hours
