@@ -832,7 +832,7 @@ router.post("/shifts/bulk", requireStaffManagement(), adminLimiter, async (req: 
 router.post("/notify-weekly", adminLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const restaurantId = req.restaurantId!;
-    const { start_date, end_date } = req.body;
+    const { start_date, end_date, employee_ids, force } = req.body;
 
     if (!start_date || !end_date) {
       res.status(400).json({ error: "MISSING_DATES", message: "start_date and end_date are required" });
@@ -885,14 +885,19 @@ router.post("/notify-weekly", adminLimiter, async (req: Request, res: Response):
     const allNotifiedShiftIds: string[] = [];
 
     for (const [empId, empShifts] of allShiftsByEmployee) {
+      // If employee_ids filter provided, skip employees not in the list
+      if (Array.isArray(employee_ids) && employee_ids.length > 0 && !employee_ids.includes(empId)) {
+        continue;
+      }
+
       const employee = employeeMap.get(empId) as any;
       if (!employee) continue;
 
       const employeeName = `${employee.first_name} ${employee.last_name}`;
       const hasChanges = employeesWithChanges.has(empId);
 
-      // Skip employees with no changes
-      if (!hasChanges) {
+      // Skip employees with no changes (unless force=true for resend)
+      if (!hasChanges && !force) {
         results.push({ employee_name: employeeName, email: employee.email || "", shifts_count: empShifts.length, changed: false, status: "no_changes" });
         continue;
       }
