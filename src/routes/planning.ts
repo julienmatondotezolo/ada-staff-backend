@@ -829,6 +829,124 @@ router.post("/shifts/bulk", requireStaffManagement(), adminLimiter, async (req: 
  *       200:
  *         description: Emails sent
  */
+/**
+ * GET /notification-status — Get notification & response status for a date range
+ */
+router.get("/notification-status", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const restaurantId = req.restaurantId!;
+    const { start_date, end_date } = req.query;
+
+    if (!start_date || !end_date) {
+      res.status(400).json({ error: "MISSING_DATES", message: "start_date and end_date are required" });
+      return;
+    }
+
+    // Get all response tokens for this period
+    const tokens = await staffDb.getShiftResponseTokensByDateRange(
+      restaurantId,
+      start_date as string,
+      end_date as string
+    );
+
+    // Get all shifts for context
+    const allShifts = await staffDb.getShifts(restaurantId, start_date as string, end_date as string);
+    const employees = await staffDb.getEmployees(restaurantId);
+    const employeeMap = new Map(employees.map((e: any) => [e.id, e]));
+
+    // Build per-employee status
+    const byEmployee = new Map<string, {
+      employee_id: string;
+      name: string;
+      email: string | null;
+      color: string;
+      total_shifts: number;
+      notified_shifts: number;
+      response: 'none' | 'pending' | 'accepted' | 'declined' | 'mixed';
+      last_notified_at: string | null;
+      responded_at: string | null;
+      token_action: string | null;
+      shifts: any[];
+    }>();
+
+    // Group shifts by employee
+    for (const shift of allShifts) {
+      const empId = shift.employee_id;
+      if (!empId) continue;
+      const emp = employeeMap.get(empId) as any;
+      if (!emp) continue;
+
+      if (!byEmployee.has(empId)) {
+        byEmployee.set(empId, {
+          employee_id: empId,
+          name: `${emp.first_name} ${emp.last_name}`,
+          email: emp.email,
+          color: emp.color || '#6b7280',
+          total_shifts: 0,
+          notified_shifts: 0,
+          response: 'none',
+          last_notified_at: null,
+          responded_at: null,
+          token_action: null,
+          shifts: [],
+        });
+      }
+
+      const entry = byEmployee.get(empId)!;
+      entry.total_shifts++;
+      if (shift.notified_at) entry.notified_shifts++;
+      if (shift.notified_at && (!entry.last_notified_at || new Date(shift.notified_at) > new Date(entry.last_notified_at))) {
+        entry.last_notified_at = shift.notified_at;
+      }
+      entry.shifts.push({
+        id: shift.id,
+        date: shift.scheduled_date,
+        start_time: shift.start_time,
+        end_time: shift.end_time,
+        position: shift.position,
+        status: shift.status,
+        notified_at: shift.notified_at,
+      });
+    }
+
+    // Enrich with response token data
+    for (const token of tokens) {
+      const empId = token.employee?.id;
+      if (!empId || !byEmployee.has(empId)) continue;
+      const entry = byEmployee.get(empId)!;
+
+      if (token.action) {
+        if (entry.token_action && entry.token_action !== token.action) {
+          entry.response = 'mixed';
+        } else {
+          entry.response = token.action;
+          entry.token_action = token.action;
+        }
+        if (token.responded_at) {
+          entry.responded_at = token.responded_at;
+        }
+      } else if (entry.last_notified_at && entry.response === 'none') {
+        entry.response = 'pending';
+      }
+    }
+
+    // Set pending for employees who were notified but have no token response
+    for (const entry of byEmployee.values()) {
+      if (entry.last_notified_at && entry.response === 'none') {
+        entry.response = 'pending';
+      }
+    }
+
+    res.json({
+      success: true,
+      employees: Array.from(byEmployee.values()),
+    });
+  } catch (error: any) {
+    console.error("Error fetching notification status:", error);
+    res.status(500).json({ error: "SERVER_ERROR", message: "Failed to fetch notification status" });
+  }
+});
+
 router.post("/notify-weekly", adminLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const restaurantId = req.restaurantId!;

@@ -916,6 +916,30 @@ export class StaffDatabaseService {
     }
   }
 
+  /**
+   * Get all response tokens for a restaurant within a date range
+   */
+  async getShiftResponseTokensByDateRange(restaurantId: string, startDate: string, endDate: string): Promise<any[]> {
+    const { data, error } = await supabase
+      .from('shift_response_tokens')
+      .select(`
+        id, token, action, responded_at, expires_at, created_at,
+        shift:shifts!inner(id, scheduled_date, start_time, end_time, position, status, employee_id),
+        employee:employees(id, first_name, last_name, email, position)
+      `)
+      .eq('restaurant_id', restaurantId)
+      .gte('shift.scheduled_date', startDate)
+      .lte('shift.scheduled_date', endDate)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn(`[getShiftResponseTokensByDateRange] ${error.message}`);
+      return [];
+    }
+
+    return data || [];
+  }
+
   // =================== NOTIFICATIONS ===================
 
   /**
