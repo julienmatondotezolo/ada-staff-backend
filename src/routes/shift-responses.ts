@@ -274,9 +274,21 @@ router.post("/:token", shiftResponseLimiter, async (req: Request, res: Response)
 
     // Update shift status
     const newShiftStatus = action === "accepted" ? "confirmed" : "declined";
-    await staffDb.updateShift(tokenData.shift.id, tokenData.restaurant_id, {
-      status: newShiftStatus as any,
-    });
+    try {
+      await staffDb.updateShift(tokenData.shift.id, tokenData.restaurant_id, {
+        status: newShiftStatus as any,
+      });
+    } catch (err: any) {
+      // Fallback: if 'declined' not in DB constraint yet, use 'cancelled'
+      if (err.message?.includes('check') || err.message?.includes('constraint') || err.message?.includes('violates')) {
+        console.warn(`[shift-response] 'declined' status rejected by DB, falling back to 'cancelled'`);
+        await staffDb.updateShift(tokenData.shift.id, tokenData.restaurant_id, {
+          status: 'cancelled' as any,
+        });
+      } else {
+        throw err;
+      }
+    }
 
     // Get restaurant name
     const restaurantName = await staffDb.getRestaurantName(tokenData.restaurant_id);
