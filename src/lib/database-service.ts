@@ -40,6 +40,7 @@ export interface Shift {
   created_by: string;
   created_at: string;
   updated_at: string;
+  notified_at?: string | null;
   // Joined data
   employee?: Pick<Employee, 'first_name' | 'last_name' | 'position'>;
 }
@@ -179,9 +180,10 @@ export class StaffDatabaseService {
         end_time TIME NOT NULL,
         position VARCHAR(100) NOT NULL,
         break_duration_minutes INTEGER NOT NULL DEFAULT 30,
-        status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'scheduled', 'confirmed', 'completed', 'cancelled')),
+        status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'scheduled', 'confirmed', 'completed', 'cancelled', 'declined')),
         notes TEXT,
         created_by UUID NOT NULL,
+        notified_at TIMESTAMP WITH TIME ZONE DEFAULT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
@@ -428,6 +430,21 @@ export class StaffDatabaseService {
     return data;
   }
   
+  /**
+   * Mark shifts as notified
+   */
+  async markShiftsNotified(shiftIds: string[]): Promise<void> {
+    const { error } = await supabase
+      .from('shifts')
+      .update({ notified_at: new Date().toISOString() })
+      .in('id', shiftIds);
+    
+    if (error) {
+      // Gracefully handle missing notified_at column — log warning but don't crash
+      console.warn(`[markShiftsNotified] Could not update notified_at: ${error.message}`);
+    }
+  }
+
   /**
    * Delete shift
    */

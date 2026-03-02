@@ -125,6 +125,42 @@ router.get("/:token", shiftResponseLimiter, async (req: Request, res: Response):
     // Get restaurant name
     const restaurantName = await staffDb.getRestaurantName(tokenData.restaurant_id);
 
+    // Get ALL shifts for this employee in the same week (±6 days from the token's shift date)
+    const shiftDate = new Date(tokenData.shift.scheduled_date + "T00:00:00");
+    const weekStart = new Date(shiftDate);
+    weekStart.setDate(shiftDate.getDate() - shiftDate.getDay() + (shiftDate.getDay() === 0 ? -6 : 1)); // Monday
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6); // Sunday
+
+    const startStr = weekStart.toISOString().split("T")[0];
+    const endStr = weekEnd.toISOString().split("T")[0];
+
+    let weeklyShifts: any[] = [];
+    try {
+      const allShifts = await staffDb.getShifts(tokenData.restaurant_id, startStr, endStr, tokenData.employee.id);
+      weeklyShifts = (allShifts || [])
+        .sort((a: any, b: any) => a.scheduled_date.localeCompare(b.scheduled_date))
+        .map((s: any) => ({
+          id: s.id,
+          date: s.scheduled_date,
+          start_time: formatTime(s.start_time),
+          end_time: formatTime(s.end_time),
+          position: s.position,
+          status: s.status,
+        }));
+    } catch (err) {
+      console.error("[shift-response] Failed to get weekly shifts:", err);
+      // Fallback to single shift
+      weeklyShifts = [{
+        id: tokenData.shift.id,
+        date: tokenData.shift.scheduled_date,
+        start_time: formatTime(tokenData.shift.start_time),
+        end_time: formatTime(tokenData.shift.end_time),
+        position: tokenData.shift.position,
+        status: tokenData.shift.status,
+      }];
+    }
+
     res.json({
       shift: {
         id: tokenData.shift.id,
@@ -135,6 +171,7 @@ router.get("/:token", shiftResponseLimiter, async (req: Request, res: Response):
         position: tokenData.shift.position,
         status: tokenData.shift.status,
       },
+      weekly_shifts: weeklyShifts,
       employee_name: `${tokenData.employee.first_name} ${tokenData.employee.last_name}`,
       restaurant_name: restaurantName,
       already_responded: alreadyResponded,
@@ -236,7 +273,7 @@ router.post("/:token", shiftResponseLimiter, async (req: Request, res: Response)
     await staffDb.updateShiftResponseToken(token, action);
 
     // Update shift status
-    const newShiftStatus = action === "accepted" ? "confirmed" : "cancelled";
+    const newShiftStatus = action === "accepted" ? "confirmed" : "declined";
     await staffDb.updateShift(tokenData.shift.id, tokenData.restaurant_id, {
       status: newShiftStatus as any,
     });

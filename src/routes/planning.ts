@@ -5,6 +5,7 @@ import { authenticateToken, requireRestaurantAccess, requireStaffManagement } fr
 import { publicLimiter, adminLimiter } from "../middleware/rate-limit";
 import { sendEmail } from "../lib/email-service";
 import { getShiftNotificationHtml } from "../templates/shift-notification";
+import { getWeeklyShiftNotificationHtml } from "../templates/weekly-shift-notification";
 
 const router = Router({ mergeParams: true });
 
@@ -387,15 +388,8 @@ router.post("/shifts", requireStaffManagement(), adminLimiter, async (req: Reque
       created_by: req.user!.id
     });
     
-    // Send shift notification (async, non-blocking)
-    sendShiftNotification(
-      newShift.id,
-      employee_id,
-      restaurantId,
-      employee,
-      { scheduled_date, start_time, end_time, position },
-      req.user!.id
-    );
+    // Email notifications are now sent via the bulk "confirm & send" flow
+    // See POST /notify-weekly endpoint
     
     // Calculate duration for response
     const startTimeObj = new Date(`1970-01-01T${start_time}`);
@@ -498,7 +492,7 @@ router.put("/shifts/:shiftId", requireStaffManagement(), adminLimiter, async (re
     
     // Validate status if provided
     if (updates.status) {
-      const validStatuses = ['draft', 'scheduled', 'confirmed', 'completed', 'cancelled'];
+      const validStatuses = ['draft', 'scheduled', 'confirmed', 'completed', 'cancelled', 'declined'];
       if (!validStatuses.includes(updates.status)) {
         res.status(400).json({
           error: "INVALID_STATUS",
@@ -760,20 +754,7 @@ router.post("/shifts/bulk", requireStaffManagement(), adminLimiter, async (req: 
           created_by: req.user!.id
         });
         
-        // Send shift notification (async, non-blocking)
-        sendShiftNotification(
-          newShift.id,
-          shift.employee_id,
-          restaurantId,
-          employee,
-          {
-            scheduled_date: shift.scheduled_date,
-            start_time: shift.start_time,
-            end_time: shift.end_time,
-            position: shift.position,
-          },
-          req.user!.id
-        );
+        // Email notifications are now sent via the bulk "confirm & send" flow
 
         createdShifts.push({
           id: newShift.id,
@@ -807,6 +788,211 @@ router.post("/shifts/bulk", requireStaffManagement(), adminLimiter, async (req: 
       message: "Failed to create bulk shifts",
       details: error.message 
     });
+  }
+});
+
+/**
+ * @swagger
+ * /api/v1/restaurants/{restaurantId}/planning/notify-weekly:
+ *   post:
+ *     summary: Send weekly shift notification emails to employees
+ *     description: |
+ *       Groups shifts by employee for the given week and sends a single email per employee
+ *       with all their shifts. Creates response tokens and notifications. Owner only.
+ *     tags: [Planning]
+ *     parameters:
+ *       - in: path
+ *         name: restaurantId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - start_date
+ *               - end_date
+ *             properties:
+ *               start_date:
+ *                 type: string
+ *                 format: date
+ *               end_date:
+ *                 type: string
+ *                 format: date
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Emails sent
+ */
+router.post("/notify-weekly", adminLimiter, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const restaurantId = req.restaurantId!;
+    const { start_date, end_date } = req.body;
+
+    if (!start_date || !end_date) {
+      res.status(400).json({ error: "MISSING_DATES", message: "start_date and end_date are required" });
+      return;
+    }
+
+    // Get all shifts for the period
+    const allShifts = await staffDb.getShifts(restaurantId, start_date, end_date);
+
+    if (!allShifts || allShifts.length === 0) {
+      res.status(400).json({ error: "NO_SHIFTS", message: "No shifts found for this period" });
+      return;
+    }
+
+    // Get all employees
+    const employees = await staffDb.getEmployees(restaurantId);
+    const employeeMap = new Map(employees.map((e: any) => [e.id, e]));
+
+    // Group ALL shifts by employee (for the full email)
+    const allShiftsByEmployee = new Map<string, any[]>();
+    for (const shift of allShifts) {
+      const empId = shift.employee_id;
+      if (!empId) continue;
+      if (!allShiftsByEmployee.has(empId)) allShiftsByEmployee.set(empId, []);
+      allShiftsByEmployee.get(empId)!.push(shift);
+    }
+
+    // Determine which employees have CHANGED shifts (new or modified since last notification)
+    // A shift is "changed" if: notified_at is null, OR updated_at > notified_at
+    const employeesWithChanges = new Set<string>();
+    for (const shift of allShifts) {
+      if (!shift.employee_id) continue;
+      const notifiedAt = shift.notified_at ? new Date(shift.notified_at).getTime() : 0;
+      const updatedAt = shift.updated_at ? new Date(shift.updated_at).getTime() : Date.now();
+      if (!shift.notified_at || updatedAt > notifiedAt) {
+        employeesWithChanges.add(shift.employee_id);
+      }
+    }
+
+    const restaurantName = await staffDb.getRestaurantName(restaurantId);
+    
+    const formatDutchDayFull = (dateStr: string) => {
+      try {
+        const d = new Date(dateStr + "T00:00:00");
+        return d.toLocaleDateString("nl-BE", { weekday: "long", day: "numeric", month: "long" });
+      } catch { return dateStr; }
+    };
+
+    const results: { employee_name: string; email: string; shifts_count: number; changed: boolean; status: string }[] = [];
+    const allNotifiedShiftIds: string[] = [];
+
+    for (const [empId, empShifts] of allShiftsByEmployee) {
+      const employee = employeeMap.get(empId) as any;
+      if (!employee) continue;
+
+      const employeeName = `${employee.first_name} ${employee.last_name}`;
+      const hasChanges = employeesWithChanges.has(empId);
+
+      // Skip employees with no changes
+      if (!hasChanges) {
+        results.push({ employee_name: employeeName, email: employee.email || "", shifts_count: empShifts.length, changed: false, status: "no_changes" });
+        continue;
+      }
+
+      if (!employee.email) {
+        results.push({ employee_name: employeeName, email: "", shifts_count: empShifts.length, changed: true, status: "no_email" });
+        continue;
+      }
+
+      // Sort shifts by date
+      empShifts.sort((a: any, b: any) => a.scheduled_date.localeCompare(b.scheduled_date));
+
+      // Collect shift IDs to mark as notified
+      empShifts.forEach((s: any) => allNotifiedShiftIds.push(s.id));
+
+      // Create a single response token
+      const token = crypto.randomUUID();
+      const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+
+      await staffDb.createShiftResponseToken({
+        shift_id: empShifts[0].id,
+        employee_id: empId,
+        restaurant_id: restaurantId,
+        token,
+        expires_at: expiresAt,
+      });
+
+      const responseUrl = `${FRONTEND_URL}/shift-response/${token}`;
+
+      const shiftEntries = empShifts.map((s: any) => ({
+        date: formatDutchDayFull(s.scheduled_date),
+        startTime: s.start_time.substring(0, 5),
+        endTime: s.end_time.substring(0, 5),
+        position: s.position || employee.position || "",
+      }));
+
+      // Week range for subject
+      const firstDate = empShifts[0].scheduled_date;
+      const lastDate = empShifts[empShifts.length - 1].scheduled_date;
+      const subjectRange = firstDate === lastDate
+        ? formatDutchDayFull(firstDate)
+        : `${formatDutchDayFull(firstDate)} – ${formatDutchDayFull(lastDate)}`;
+
+      const html = getWeeklyShiftNotificationHtml({
+        employeeName,
+        restaurantName,
+        weekLabel: subjectRange,
+        shifts: shiftEntries,
+        responseUrl,
+      });
+
+      try {
+        await sendEmail({
+          to: employee.email,
+          subject: `Nieuw rooster bij ${restaurantName}: ${subjectRange}`,
+          html,
+        });
+        results.push({ employee_name: employeeName, email: employee.email, shifts_count: empShifts.length, changed: true, status: "sent" });
+        // Rate limit: Resend free plan allows max 2 requests/sec
+        await new Promise(resolve => setTimeout(resolve, 600));
+      } catch (err: any) {
+        console.error(`[notify-weekly] Failed to send to ${employee.email}:`, err);
+        results.push({ employee_name: employeeName, email: employee.email, shifts_count: empShifts.length, changed: true, status: "failed" });
+      }
+    }
+
+    // Mark all sent shifts as notified
+    if (allNotifiedShiftIds.length > 0) {
+      await staffDb.markShiftsNotified(allNotifiedShiftIds);
+    }
+
+    // Create single notification for managers
+    const sentCount = results.filter(r => r.status === "sent").length;
+    if (sentCount > 0) {
+      const managers = await staffDb.getRestaurantManagers(restaurantId);
+      for (const manager of managers) {
+        await staffDb.createNotification({
+          restaurant_id: restaurantId,
+          recipient_user_id: manager.user_id,
+          type: "shift_pending",
+          title: `Werkrooster verstuurd naar ${sentCount} medewerker(s)`,
+          message: `Planning ${start_date} – ${end_date} verstuurd. Wacht op bevestiging.`,
+          metadata: { start_date, end_date, sent_count: sentCount },
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      total_employees: results.length,
+      sent: results.filter(r => r.status === "sent").length,
+      failed: results.filter(r => r.status === "failed").length,
+      no_email: results.filter(r => r.status === "no_email").length,
+      no_changes: results.filter(r => r.status === "no_changes").length,
+      details: results,
+    });
+
+  } catch (error: any) {
+    console.error("Error sending weekly notifications:", error);
+    res.status(500).json({ error: "SERVER_ERROR", message: "Failed to send weekly notifications" });
   }
 });
 
