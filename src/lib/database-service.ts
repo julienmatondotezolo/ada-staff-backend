@@ -41,6 +41,9 @@ export interface Shift {
   created_at: string;
   updated_at: string;
   notified_at?: string | null;
+  notified_date?: string | null;
+  notified_start_time?: string | null;
+  notified_end_time?: string | null;
   // Joined data
   employee?: Pick<Employee, 'first_name' | 'last_name' | 'position'>;
 }
@@ -111,6 +114,11 @@ export class StaffDatabaseService {
       if (!existingTables.includes('schedule_templates')) {
         console.log('Creating schedule_templates table...');
         await this.createScheduleTemplatesTable();
+      }
+
+      // Run migrations for existing tables
+      if (existingTables.includes('shifts')) {
+        await this.migrateShiftsTable();
       }
       
     } catch (error) {
@@ -184,6 +192,9 @@ export class StaffDatabaseService {
         notes TEXT,
         created_by UUID NOT NULL,
         notified_at TIMESTAMP WITH TIME ZONE DEFAULT NULL,
+        notified_date DATE DEFAULT NULL,
+        notified_start_time TIME DEFAULT NULL,
+        notified_end_time TIME DEFAULT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
@@ -249,6 +260,39 @@ export class StaffDatabaseService {
     `;
     
     await supabase.rpc('exec_sql', { sql });
+  }
+
+  /**
+   * Migrate shifts table — add notified schedule snapshot columns if missing
+   */
+  private async migrateShiftsTable(): Promise<void> {
+    try {
+      // Check if notified_date column exists
+      const { data: columns } = await supabase
+        .from('information_schema.columns')
+        .select('column_name')
+        .eq('table_schema', 'public')
+        .eq('table_name', 'shifts')
+        .in('column_name', ['notified_date', 'notified_start_time', 'notified_end_time']);
+
+      const existingCols = new Set((columns || []).map(c => c.column_name));
+
+      if (!existingCols.has('notified_date')) {
+        console.log('  ↳ Adding notified_date column to shifts...');
+        await supabase.rpc('exec_sql', { sql: 'ALTER TABLE shifts ADD COLUMN IF NOT EXISTS notified_date DATE DEFAULT NULL;' });
+      }
+      if (!existingCols.has('notified_start_time')) {
+        console.log('  ↳ Adding notified_start_time column to shifts...');
+        await supabase.rpc('exec_sql', { sql: 'ALTER TABLE shifts ADD COLUMN IF NOT EXISTS notified_start_time TIME DEFAULT NULL;' });
+      }
+      if (!existingCols.has('notified_end_time')) {
+        console.log('  ↳ Adding notified_end_time column to shifts...');
+        await supabase.rpc('exec_sql', { sql: 'ALTER TABLE shifts ADD COLUMN IF NOT EXISTS notified_end_time TIME DEFAULT NULL;' });
+      }
+    } catch (error: any) {
+      // Non-fatal — columns might already exist or exec_sql might not be available
+      console.warn(`[migrateShiftsTable] Migration warning: ${error.message}`);
+    }
   }
 
   // =================== EMPLOYEES ===================
@@ -431,17 +475,41 @@ export class StaffDatabaseService {
   }
   
   /**
-   * Mark shifts as notified
+   * Mark shifts as notified — snapshots current schedule so we can detect real changes later
    */
   async markShiftsNotified(shiftIds: string[]): Promise<void> {
-    const { error } = await supabase
-      .from('shifts')
-      .update({ notified_at: new Date().toISOString() })
-      .in('id', shiftIds);
-    
-    if (error) {
-      // Gracefully handle missing notified_at column — log warning but don't crash
-      console.warn(`[markShiftsNotified] Could not update notified_at: ${error.message}`);
+    try {
+      // First fetch the current schedule values for these shifts
+      const { data: shifts, error: fetchError } = await supabase
+        .from('shifts')
+        .select('id, scheduled_date, start_time, end_time')
+        .in('id', shiftIds);
+
+      if (fetchError) {
+        console.warn(`[markShiftsNotified] Could not fetch shifts: ${fetchError.message}`);
+        return;
+      }
+
+      const now = new Date().toISOString();
+
+      // Update each shift with its own schedule snapshot
+      for (const shift of (shifts || [])) {
+        const { error } = await supabase
+          .from('shifts')
+          .update({
+            notified_at: now,
+            notified_date: shift.scheduled_date,
+            notified_start_time: shift.start_time,
+            notified_end_time: shift.end_time,
+          })
+          .eq('id', shift.id);
+
+        if (error) {
+          console.warn(`[markShiftsNotified] Could not update shift ${shift.id}: ${error.message}`);
+        }
+      }
+    } catch (error: any) {
+      console.warn(`[markShiftsNotified] Error: ${error.message}`);
     }
   }
 

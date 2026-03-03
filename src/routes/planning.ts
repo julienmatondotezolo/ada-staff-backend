@@ -220,7 +220,10 @@ router.get("/shifts", publicLimiter, async (req: Request, res: Response): Promis
         created_by: shift.created_by,
         created_at: shift.created_at,
         updated_at: shift.updated_at,
-        notified_at: shift.notified_at || null
+        notified_at: shift.notified_at || null,
+        notified_date: shift.notified_date || null,
+        notified_start_time: shift.notified_start_time || null,
+        notified_end_time: shift.notified_end_time || null
       };
     });
 
@@ -979,15 +982,28 @@ router.post("/notify-weekly", adminLimiter, async (req: Request, res: Response):
       allShiftsByEmployee.get(empId)!.push(shift);
     }
 
-    // Determine which employees have CHANGED shifts (new or modified since last notification)
-    // A shift is "changed" if: notified_at is null, OR updated_at > notified_at
+    // Determine which employees have CHANGED shifts (new or schedule modified since last notification)
+    // A shift is "changed" if: never notified, OR date/time differ from notified snapshot
     const employeesWithChanges = new Set<string>();
     for (const shift of allShifts) {
       if (!shift.employee_id) continue;
-      const notifiedAt = shift.notified_at ? new Date(shift.notified_at).getTime() : 0;
-      const updatedAt = shift.updated_at ? new Date(shift.updated_at).getTime() : Date.now();
-      if (!shift.notified_at || updatedAt > notifiedAt) {
+      if (!shift.notified_at) {
+        // Never notified — always a change
         employeesWithChanges.add(shift.employee_id);
+      } else if (shift.notified_date && shift.notified_start_time && shift.notified_end_time) {
+        // Compare actual schedule vs notified snapshot
+        if (shift.scheduled_date !== shift.notified_date ||
+            shift.start_time !== shift.notified_start_time ||
+            shift.end_time !== shift.notified_end_time) {
+          employeesWithChanges.add(shift.employee_id);
+        }
+      } else {
+        // Legacy fallback: no snapshot stored, use timestamp comparison
+        const notifiedAt = new Date(shift.notified_at).getTime();
+        const updatedAt = shift.updated_at ? new Date(shift.updated_at).getTime() : Date.now();
+        if (updatedAt > notifiedAt) {
+          employeesWithChanges.add(shift.employee_id);
+        }
       }
     }
 
