@@ -219,7 +219,8 @@ router.get("/shifts", publicLimiter, async (req: Request, res: Response): Promis
         notes: shift.notes,
         created_by: shift.created_by,
         created_at: shift.created_at,
-        updated_at: shift.updated_at
+        updated_at: shift.updated_at,
+        notified_at: shift.notified_at || null
       };
     });
 
