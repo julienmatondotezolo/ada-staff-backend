@@ -934,9 +934,18 @@ router.get("/notification-status", async (req: Request, res: Response): Promise<
       }
     }
 
-    // Set pending for employees who were notified but have no token response
+    // Derive response from actual shift statuses (source of truth)
     for (const entry of byEmployee.values()) {
-      if (entry.last_notified_at && entry.response === 'none') {
+      const statuses = new Set(entry.shifts.map((s: any) => s.status));
+      if (statuses.has('declined') || statuses.has('cancelled')) {
+        if (statuses.has('confirmed')) {
+          entry.response = 'mixed';
+        } else if ([...statuses].every((st) => st === 'declined' || st === 'cancelled')) {
+          entry.response = 'declined';
+        }
+      } else if (statuses.has('confirmed') && !statuses.has('scheduled')) {
+        entry.response = 'accepted';
+      } else if (entry.last_notified_at && entry.response === 'none') {
         entry.response = 'pending';
       }
     }
