@@ -951,10 +951,24 @@ router.get("/notification-status", async (req: Request, res: Response): Promise<
   }
 });
 
+// Guard against duplicate notification sends (in-flight dedup)
+const notifyInFlight = new Set<string>();
+
 router.post("/notify-weekly", adminLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const restaurantId = req.restaurantId!;
     const { start_date, end_date, employee_ids, force } = req.body;
+
+    // Dedup: prevent duplicate in-flight requests for same restaurant + date range
+    const dedupKey = `${restaurantId}:${start_date}:${end_date}:${(employee_ids || []).sort().join(',')}`;
+    if (notifyInFlight.has(dedupKey)) {
+      res.status(429).json({ error: "DUPLICATE_REQUEST", message: "Notification already being sent for this period." });
+      return;
+    }
+    notifyInFlight.add(dedupKey);
+
+    // Auto-cleanup after 30s
+    setTimeout(() => notifyInFlight.delete(dedupKey), 30_000);
 
     if (!start_date || !end_date) {
       res.status(400).json({ error: "MISSING_DATES", message: "start_date and end_date are required" });
@@ -1120,6 +1134,8 @@ router.post("/notify-weekly", adminLimiter, async (req: Request, res: Response):
       }
     }
 
+    notifyInFlight.delete(dedupKey);
+
     res.json({
       success: true,
       total_employees: results.length,
@@ -1131,6 +1147,7 @@ router.post("/notify-weekly", adminLimiter, async (req: Request, res: Response):
     });
 
   } catch (error: any) {
+    notifyInFlight.delete(dedupKey);
     console.error("Error sending weekly notifications:", error);
     res.status(500).json({ error: "SERVER_ERROR", message: "Failed to send weekly notifications" });
   }

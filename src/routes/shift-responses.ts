@@ -272,21 +272,37 @@ router.post("/:token", shiftResponseLimiter, async (req: Request, res: Response)
     // Update token with response
     await staffDb.updateShiftResponseToken(token, action);
 
-    // Update shift status
+    // Update ALL shifts for this employee in the same week (not just the token's shift)
     const newShiftStatus = action === "accepted" ? "confirmed" : "declined";
+    const shiftDate = new Date(tokenData.shift.scheduled_date + "T00:00:00");
+    const weekStart = new Date(shiftDate);
+    weekStart.setDate(shiftDate.getDate() - shiftDate.getDay() + (shiftDate.getDay() === 0 ? -6 : 1));
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    const startStr = weekStart.toISOString().split("T")[0];
+    const endStr = weekEnd.toISOString().split("T")[0];
+
+    let allEmployeeShifts: any[] = [];
     try {
-      await staffDb.updateShift(tokenData.shift.id, tokenData.restaurant_id, {
-        status: newShiftStatus as any,
-      });
-    } catch (err: any) {
-      // Fallback: if 'declined' not in DB constraint yet, use 'cancelled'
-      if (err.message?.includes('check') || err.message?.includes('constraint') || err.message?.includes('violates')) {
-        console.warn(`[shift-response] 'declined' status rejected by DB, falling back to 'cancelled'`);
-        await staffDb.updateShift(tokenData.shift.id, tokenData.restaurant_id, {
-          status: 'cancelled' as any,
+      allEmployeeShifts = await staffDb.getShifts(tokenData.restaurant_id, startStr, endStr, tokenData.employee.id);
+    } catch {
+      allEmployeeShifts = [{ id: tokenData.shift.id }];
+    }
+
+    for (const shift of allEmployeeShifts) {
+      try {
+        await staffDb.updateShift(shift.id, tokenData.restaurant_id, {
+          status: newShiftStatus as any,
         });
-      } else {
-        throw err;
+      } catch (err: any) {
+        if (err.message?.includes('check') || err.message?.includes('constraint') || err.message?.includes('violates')) {
+          console.warn(`[shift-response] 'declined' status rejected by DB for shift ${shift.id}, falling back to 'cancelled'`);
+          await staffDb.updateShift(shift.id, tokenData.restaurant_id, {
+            status: 'cancelled' as any,
+          });
+        } else {
+          throw err;
+        }
       }
     }
 
