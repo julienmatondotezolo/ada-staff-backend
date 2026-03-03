@@ -179,20 +179,8 @@ router.get("/labor-cost", publicLimiter, async (req: Request, res: Response): Pr
         });
       }
 
-      // Date totals — group key depends on period
-      let groupKey: string;
-      if (period === "weekly") {
-        // Get the Monday of that week
-        const d = new Date(shift.scheduled_date + "T00:00:00");
-        const day = d.getDay();
-        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-        const monday = new Date(d.setDate(diff));
-        groupKey = monday.toISOString().split("T")[0];
-      } else if (period === "monthly") {
-        groupKey = shift.scheduled_date.substring(0, 7); // YYYY-MM
-      } else {
-        groupKey = shift.scheduled_date;
-      }
+      // Date totals — always use daily granularity for bar chart
+      const groupKey = shift.scheduled_date;
 
       const existingDate = dateMap.get(groupKey);
       if (existingDate) {
