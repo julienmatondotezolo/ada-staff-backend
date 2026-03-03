@@ -83,6 +83,17 @@ export interface ClosingPeriod {
   updated_at: string;
 }
 
+export interface ExclusiveOpeningDay {
+  id: string;
+  restaurant_id: string;
+  name: string;
+  date_from: string; // YYYY-MM-DD
+  date_to: string;   // YYYY-MM-DD
+  comment?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export class StaffDatabaseService {
   
   /**
@@ -848,6 +859,96 @@ export class StaffDatabaseService {
 
     if (error) {
       throw new Error(`Failed to delete closing period: ${error.message}`);
+    }
+  }
+
+  // =================== EXCLUSIVE OPENING DAYS ===================
+
+  /**
+   * Get all exclusive opening days for a restaurant, ordered by date_from
+   */
+  async getExclusiveOpeningDays(restaurantId: string): Promise<ExclusiveOpeningDay[]> {
+    const { data, error } = await supabase
+      .from('exclusive_opening_days')
+      .select('*')
+      .eq('restaurant_id', restaurantId)
+      .order('date_from');
+
+    if (error) {
+      if (error.code === '42P01') return [];
+      throw new Error(`Failed to fetch exclusive opening days: ${error.message}`);
+    }
+
+    return data || [];
+  }
+
+  /**
+   * Get a single exclusive opening day by ID
+   */
+  async getExclusiveOpeningDayById(id: string, restaurantId: string): Promise<ExclusiveOpeningDay | null> {
+    const { data, error } = await supabase
+      .from('exclusive_opening_days')
+      .select('*')
+      .eq('id', id)
+      .eq('restaurant_id', restaurantId)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') return null;
+      throw new Error(`Failed to fetch exclusive opening day: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  /**
+   * Create a new exclusive opening day
+   */
+  async createExclusiveOpeningDay(data: Omit<ExclusiveOpeningDay, 'id' | 'created_at' | 'updated_at'>): Promise<ExclusiveOpeningDay> {
+    const { data: created, error } = await supabase
+      .from('exclusive_opening_days')
+      .insert(data)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to create exclusive opening day: ${error.message}`);
+    }
+
+    return created;
+  }
+
+  /**
+   * Update an exclusive opening day
+   */
+  async updateExclusiveOpeningDay(id: string, restaurantId: string, updates: Partial<ExclusiveOpeningDay>): Promise<ExclusiveOpeningDay> {
+    const { data, error } = await supabase
+      .from('exclusive_opening_days')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('restaurant_id', restaurantId)
+      .select()
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to update exclusive opening day: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  /**
+   * Delete an exclusive opening day (hard delete)
+   */
+  async deleteExclusiveOpeningDay(id: string, restaurantId: string): Promise<void> {
+    const { error } = await supabase
+      .from('exclusive_opening_days')
+      .delete()
+      .eq('id', id)
+      .eq('restaurant_id', restaurantId);
+
+    if (error) {
+      throw new Error(`Failed to delete exclusive opening day: ${error.message}`);
     }
   }
 

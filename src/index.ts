@@ -7,6 +7,7 @@ import employeeRoutes from "./routes/employees";
 import settingsRoutes from "./routes/settings";
 import shiftPresetsRoutes from "./routes/shift-presets";
 import closingPeriodsRoutes from "./routes/closing-periods";
+import exclusiveOpeningDaysRoutes from "./routes/exclusive-opening-days";
 import notificationsRoutes from "./routes/notifications";
 import shiftResponseRoutes from "./routes/shift-responses";
 import analyticsRoutes from "./routes/analytics";
@@ -170,6 +171,7 @@ app.get("/", (_req, res) => {
       shifts: "/api/v1/restaurants/{restaurantId}/planning/shifts",
       templates: "/api/v1/restaurants/{restaurantId}/planning/templates",
       closing_periods: "/api/v1/restaurants/{restaurantId}/closing-periods",
+      exclusive_opening_days: "/api/v1/restaurants/{restaurantId}/exclusive-opening-days",
       notifications: "/api/v1/restaurants/{restaurantId}/notifications",
       analytics: "/api/v1/restaurants/{restaurantId}/analytics/labor-cost",
       shift_response: "/api/v1/shift-response/{token}",
@@ -195,6 +197,7 @@ app.use("/api/v1/restaurants/:restaurantId/employees", employeeRoutes);
 app.use("/api/v1/restaurants/:restaurantId/settings", settingsRoutes);
 app.use("/api/v1/restaurants/:restaurantId/shift-presets", shiftPresetsRoutes);
 app.use("/api/v1/restaurants/:restaurantId/closing-periods", closingPeriodsRoutes);
+app.use("/api/v1/restaurants/:restaurantId/exclusive-opening-days", exclusiveOpeningDaysRoutes);
 app.use("/api/v1/restaurants/:restaurantId/notifications", notificationsRoutes);
 app.use("/api/v1/restaurants/:restaurantId/analytics", analyticsRoutes);
 
@@ -214,6 +217,7 @@ app.use("*", (req, res) => {
       settings: "/api/v1/restaurants/{restaurantId}/settings",
       shift_presets: "/api/v1/restaurants/{restaurantId}/shift-presets",
       closing_periods: "/api/v1/restaurants/{restaurantId}/closing-periods",
+      exclusive_opening_days: "/api/v1/restaurants/{restaurantId}/exclusive-opening-days",
       notifications: "/api/v1/restaurants/{restaurantId}/notifications",
       analytics: "/api/v1/restaurants/{restaurantId}/analytics",
       shift_response: "/api/v1/shift-response/{token}"
