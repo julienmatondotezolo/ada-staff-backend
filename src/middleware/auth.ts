@@ -40,37 +40,45 @@ export const authenticateToken = async (req: Request, res: Response, next: NextF
       });
     }
 
-    // Validate token with Supabase (using SERVICE key - ANON key was invalid)
-    const { data, error } = await supabase.auth.getUser(token);
-    
-    if (error || !data.user) {
+    // Validate token via AdaAuth with app_slug enforcement
+    const AUTH_URL = process.env.ADAAUTH_URL || 'https://auth.adasystems.app';
+    const validateRes = await fetch(`${AUTH_URL}/auth/validate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'AdaPlanning-Backend/1.0',
+      },
+      body: JSON.stringify({ access_token: token, app_slug: 'ada-planning' }),
+    });
+
+    if (validateRes.status === 403) {
+      return res.status(403).json({
+        error: "APP_ACCESS_DENIED",
+        message: "Your restaurant does not have access to this application"
+      });
+    }
+
+    if (!validateRes.ok) {
       return res.status(401).json({
         error: "INVALID_TOKEN",
         message: "Invalid or expired access token"
       });
     }
 
-    // Get user profile from auth_users table
-    const { data: userProfile, error: profileError } = await supabase
-      .from('auth_users')
-      .select('*')
-      .eq('id', data.user.id)
-      .single();
-
-    if (profileError) {
-      console.error("Failed to get user profile:", profileError);
+    const validateData = await validateRes.json();
+    if (!validateData.valid || !validateData.user) {
       return res.status(401).json({
-        error: "USER_PROFILE_NOT_FOUND",
-        message: "User profile not found"
+        error: "INVALID_TOKEN",
+        message: "Invalid or expired access token"
       });
     }
 
     // Add user info to request
     req.user = {
-      id: data.user.id,
-      email: data.user.email || userProfile.email,
-      full_name: userProfile.full_name,
-      role: userProfile.role
+      id: validateData.user.id,
+      email: validateData.user.email,
+      full_name: validateData.user.full_name,
+      role: validateData.user.role
     };
 
     next();
