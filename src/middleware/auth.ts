@@ -65,7 +65,7 @@ export const authenticateToken = async (req: Request, res: Response, next: NextF
       });
     }
 
-    const validateData = await validateRes.json();
+    const validateData: any = await validateRes.json();
     if (!validateData.valid || !validateData.user) {
       return res.status(401).json({
         error: "INVALID_TOKEN",
